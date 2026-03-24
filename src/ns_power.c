@@ -47,7 +47,7 @@
 #include "am_mcu_apollo.h"
 #include "am_util.h"
 #include "ns_core.h"
-#include "ns_peripherals_power.h"
+#include "nsx_power.h"
 
 const ns_core_api_t ns_power_V0_0_1 = {.apiId = NS_POWER_API_ID, .version = NS_POWER_V0_0_1};
 

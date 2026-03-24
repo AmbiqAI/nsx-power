@@ -47,7 +47,7 @@
 #include "am_mcu_apollo.h"
 #include "am_util.h"
 #include "ns_core.h"
-#include "ns_peripherals_power.h"
+#include "nsx_power.h"
 #ifdef apollo510b_evb
 #include "am_devices_em9305.h"
 #endif

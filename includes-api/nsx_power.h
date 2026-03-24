@@ -1,5 +1,5 @@
 /**
- * @file ns_peripherals_power.h
+ * @file nsx_power.h
  * @author Carlos Morales
  * @brief neuralSPOT Power Management Library
  * @version 0.1
