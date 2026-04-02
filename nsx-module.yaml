@@ -9,6 +9,24 @@ support:
   ambiqsuite: true
   zephyr: false
 
+summary: Power-management helpers for sleep policy, shutdown control, and low-power workflows.
+
+capabilities:
+  - power
+  - low_power
+  - sleep_control
+
+use_cases:
+  - low-power application behavior
+  - sleep and wake control
+  - power-policy experimentation and validation
+
+agent_keywords:
+  - power
+  - sleep
+  - low power
+  - wake
+
 build:
   cmake:
     package: nsx_power
