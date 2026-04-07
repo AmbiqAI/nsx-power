@@ -135,7 +135,7 @@ void ns_power_memory_config(const ns_power_config_t *pCfg) {
                 .eNVMCfg        = AM_HAL_PWRCTRL_NVM0_AND_NVM1,
             #endif
         #endif // 5A
-        .bKeepNVMOnInDeepSleep     = false 
+        .bKeepNVMOnInDeepSleep     = false
     };
 
     am_hal_pwrctrl_mcu_memory_config(&McuMemCfg);
@@ -160,7 +160,7 @@ void ns_power_memory_config(const ns_power_config_t *pCfg) {
             .eSRAMCfg = AM_HAL_PWRCTRL_SRAM_NONE,
             .eActiveWithMCU  = AM_HAL_PWRCTRL_SRAM_NONE,
             .eActiveWithGFX  = AM_HAL_PWRCTRL_SRAM_NONE,
-            .eActiveWithDISP = AM_HAL_PWRCTRL_SRAM_NONE,          
+            .eActiveWithDISP = AM_HAL_PWRCTRL_SRAM_NONE,
             .eSRAMRetain     = AM_HAL_PWRCTRL_SRAM_NONE
         };
         am_hal_pwrctrl_sram_config(&SRAMMemCfg);
@@ -175,13 +175,13 @@ void ns_power_memory_config(const ns_power_config_t *pCfg) {
             // .eActiveWithMCU   = PWRCTRL_SSRAMPWREN_PWRENSSRAM_ALL,
             .eActiveWithMCU   = AM_HAL_PWRCTRL_SRAM_NONE,
             .eActiveWithGFX   = AM_HAL_PWRCTRL_SRAM_NONE,
-            .eActiveWithDISP  = AM_HAL_PWRCTRL_SRAM_NONE,   
+            .eActiveWithDISP  = AM_HAL_PWRCTRL_SRAM_NONE,
             #ifndef apollo510L_eb
             .eSRAMRetain = AM_HAL_PWRCTRL_SRAM_3M
             #else
             .eSRAMRetain = AM_HAL_PWRCTRL_SRAM_1P75M
             #endif
-        };       
+        };
         am_hal_pwrctrl_sram_config(&SRAMMemCfg);
     };
 }
@@ -207,9 +207,13 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
 #endif
 
     am_bsp_low_power_init();
-    // am_hal_spotmgr_profile_t spotmgr_profile; 
-    // spotmgr_profile.PROFILE_b.COLLAPSESTMANDSTMP = 1;
-    // am_hal_spotmgr_profile_set(&spotmgr_profile);
+
+    if (pCfg->bEnableSpotMgrProfile) {
+        am_hal_spotmgr_profile_t spotmgr_profile;
+        spotmgr_profile.PROFILE = 0;
+        spotmgr_profile.PROFILE_b.COLLAPSESTMANDSTMP = 1;
+        am_hal_spotmgr_profile_set(&spotmgr_profile);
+    }
     #define ELP_ON                              1
     am_hal_pwrctrl_pwrmodctl_cpdlp_t sDefaultCpdlpConfig =
     {
@@ -231,13 +235,21 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     // am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_DIS_PERIPHS_ALL, 0);
     // MCUCTRL->XTALCTRL = 0;
     // am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_XTAL_PWDN_DEEPSLEEP, 0);
-    am_hal_rtc_osc_select(AM_HAL_RTC_OSC_LFRC); // Use LFRC instead of XT
-    am_hal_rtc_osc_disable();
+    if (!pCfg->bNeedXtal) {
+        am_hal_rtc_osc_select(AM_HAL_RTC_OSC_LFRC); // Use LFRC instead of XT
+        am_hal_rtc_osc_disable();
+    }
     VCOMP->PWDKEY = VCOMP_PWDKEY_PWDKEY_Key;
-    MCUCTRL->DBGCTRL = 0;
+    if (!pCfg->bNeedITM) {
+        MCUCTRL->DBGCTRL = 0;
+    }
     // Powering down various peripheral power domains
-    am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_DEBUG);
-    am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_CRYPTO);
+    if (!pCfg->bNeedITM) {
+        am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_DEBUG);
+    }
+    if (!pCfg->bNeedCrypto) {
+        am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_CRYPTO);
+    }
     am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_OTP);
 
     ns_power_memory_config(pCfg);
@@ -288,7 +300,7 @@ void ns_platform_deep_sleep(void) {
 
 
 
-        
+
     //     am_bsp_uart_printf_disable();
     //     g_ns_state.uartPrintCurrentlyEnabled = false;
     // } else if (g_ns_state.itmPrintCurrentlyEnabled) {

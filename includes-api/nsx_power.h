@@ -93,8 +93,9 @@ typedef struct {
     bool bNeedAlternativeUART;    ///< for EEMBC Power Control Module and similar
     bool b128kTCM;                ///< Only enable 128k when true, 384k otherwise
     bool bEnableTempCo;           ///< Enable Temperature Compensation
-    bool bNeedITM;                ///< Enable Temperature Compensation
+    bool bNeedITM;                ///< Enable ITM printing
     bool bNeedXtal;               ///< Enable XTAL
+    bool bEnableSpotMgrProfile;   ///< Enable SpotManager profile (Apollo5 family only, collapses STM power states)
 } ns_power_config_t;
 
 extern const ns_power_config_t ns_development_default; ///< Enables most things
