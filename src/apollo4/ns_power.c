@@ -50,13 +50,12 @@
 #include "nsx_power.h"
 #include "ns_tempco.h"
 
-uint32_t ns_set_performance_mode(ns_power_mode_e eAIPowerMode) {
-    // Configure power mode
-    if ((eAIPowerMode == NS_MAXIMUM_PERF) || (eAIPowerMode == NS_MEDIUM_PERF))
+uint32_t ns_set_performance_mode(ns_perf_mode_e mode) {
+    if ((mode == NS_PERF_HIGH) || (mode == NS_PERF_MAX))
         am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE);
-    else if (eAIPowerMode == NS_MINIMUM_PERF)
+    else if (mode == NS_PERF_LOW)
         am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_LOW_POWER);
-    else 
+    else
         return NS_STATUS_INVALID_CONFIG;
 
     return NS_STATUS_SUCCESS;
@@ -89,7 +88,7 @@ void ns_power_down_peripherals(const ns_power_config_t *pCfg) {
 #endif
 // return; ok
 #ifdef AM_DEVICES_BLECTRLR_RESET_PIN
-    if (pCfg->bNeedBluetooth == false) {
+    if (pCfg->need_ble == false) {
         //
         // For SiP packages, put the BLE Controller in reset.
         //
@@ -106,7 +105,7 @@ void ns_power_down_peripherals(const ns_power_config_t *pCfg) {
     //
     am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOS);
 
-    if (pCfg->bNeedIOM == false) {
+    if (pCfg->need_iom == false) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM0);
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM1);
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM2);
@@ -117,7 +116,7 @@ void ns_power_down_peripherals(const ns_power_config_t *pCfg) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_IOM7);
     };
 
-    if (pCfg->bNeedAlternativeUART == false) {
+    if (pCfg->need_uart == false) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_UART0);
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_UART3);
     }
@@ -149,17 +148,17 @@ void ns_power_down_peripherals(const ns_power_config_t *pCfg) {
     am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_I2S0);
 // return;
 #ifndef AM_PART_APOLLO4L
-    if (pCfg->bNeedAudAdc == false) {
+    if (pCfg->need_audadc == false) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_AUDADC);
     }
 #endif
 
-    if (pCfg->bNeedCrypto == false) {
+    if (pCfg->need_crypto == false) {
         // Power down Crypto.
         am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_CRYPTO_POWERDOWN, 0);
     }
     // return;
-    if (pCfg->bNeedXtal == false) {
+    if (pCfg->need_xtal == false) {
         // XTAL powerdown
         am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_XTAL_PWDN_DEEPSLEEP, 0);
     }
@@ -188,7 +187,7 @@ uint32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     am_bsp_low_power_init();
 
     // configure SRAM & other memories
-    if (pCfg->bNeedSharedSRAM == false) {
+    if (pCfg->need_ssram == false) {
         am_hal_pwrctrl_sram_memcfg_t SRAMMemCfg = {
             .eSRAMCfg = AM_HAL_PWRCTRL_SRAM_NONE,
             .eActiveWithMCU = AM_HAL_PWRCTRL_SRAM_NONE,
@@ -225,9 +224,9 @@ uint32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     ns_power_down_peripherals(pCfg);
 
     // Configure power mode
-    NS_TRY(ns_set_performance_mode(pCfg->eAIPowerMode), "Set CPU Perf mode failed.");
+    NS_TRY(ns_set_performance_mode(pCfg->perf_mode), "Set CPU Perf mode failed.");
 
-    if (pCfg->b128kTCM == true) {
+    if (pCfg->small_tcm == true) {
 
         am_hal_pwrctrl_mcu_memory_config_t McuMemCfg = {
             .eCacheCfg = AM_HAL_PWRCTRL_CACHE_ALL,
@@ -240,7 +239,7 @@ uint32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
         am_hal_pwrctrl_mcu_memory_config(&McuMemCfg);
     }
 
-    if (pCfg->bEnableTempCo) {
+    if (pCfg->need_tempco) {
 #if defined(NS_AMBIQSUITE_VERSION_R4_1_0) || defined(AM_PART_APOLLO4L)
         ns_lp_printf("WARNING TempCo not supported by AmbiqSuite R4.1.0 or Apollo4 Lite\n");
 #else
@@ -254,9 +253,9 @@ uint32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
         }
 #endif
     }
-    g_ns_state.cryptoWantsToBeEnabled = pCfg->bNeedCrypto;
-    g_ns_state.cryptoCurrentlyEnabled = pCfg->bNeedCrypto;
-    g_ns_state.itmPrintWantsToBeEnabled = pCfg->bNeedITM;
+    g_ns_state.cryptoWantsToBeEnabled = pCfg->need_crypto;
+    g_ns_state.cryptoCurrentlyEnabled = pCfg->need_crypto;
+    g_ns_state.itmPrintWantsToBeEnabled = pCfg->need_itm;
 
     return ui32ReturnStatus;
 }

@@ -55,17 +55,15 @@
 #include "am_hal_clkmgr.h"
 #include "am_hal_spotmgr.h"
 
-static ns_power_mode_e current_power_mode = NS_POWER_MODE_NOT_SET;
-static ns_power_mode_e desired_power_mode = NS_POWER_MODE_NOT_SET;
-uint32_t ns_set_performance_mode(ns_power_mode_e eAIPowerMode) {
-    // Configure power mode
+static ns_perf_mode_e current_power_mode = NS_PERF_NOT_SET;
+static ns_perf_mode_e desired_power_mode = NS_PERF_NOT_SET;
+uint32_t ns_set_performance_mode(ns_perf_mode_e mode) {
     uint32_t retval = NS_STATUS_SUCCESS;
-    current_power_mode = eAIPowerMode;
-    desired_power_mode = eAIPowerMode;
-    if (eAIPowerMode == NS_MAXIMUM_PERF) {
+    current_power_mode = mode;
+    desired_power_mode = mode;
+    if (mode == NS_PERF_MAX) {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE2);
-    }
-    else if (eAIPowerMode == NS_MEDIUM_PERF) {
+    } else if (mode == NS_PERF_HIGH) {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE1);
     } else {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_LOW_POWER);
@@ -75,9 +73,9 @@ uint32_t ns_set_performance_mode(ns_power_mode_e eAIPowerMode) {
 }
 
 uint32_t ns_power_pdm_workaround_pre(void) {
-    if (current_power_mode == NS_MAXIMUM_PERF) {
+    if (current_power_mode == NS_PERF_MAX) {
         am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE1);
-        current_power_mode = NS_MEDIUM_PERF;
+        current_power_mode = NS_PERF_HIGH;
     }
     return NS_STATUS_SUCCESS;
 }
@@ -158,7 +156,7 @@ void ns_power_memory_config(const ns_power_config_t *pCfg) {
 //     #endif
 // #endif
 
-    if (pCfg->bNeedSharedSRAM == false) {
+    if (pCfg->need_ssram == false) {
         am_hal_pwrctrl_sram_memcfg_t SRAMMemCfg = {
             .eSRAMCfg = AM_HAL_PWRCTRL_SRAM_NONE,
             .eActiveWithMCU  = AM_HAL_PWRCTRL_SRAM_NONE,
@@ -211,7 +209,7 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
 
     am_bsp_low_power_init();
 
-    if (pCfg->bEnableSpotMgrProfile) {
+    if (pCfg->spotmgr_collapse) {
         am_hal_spotmgr_profile_t spotmgr_profile;
         spotmgr_profile.PROFILE = 0;
         spotmgr_profile.PROFILE_b.COLLAPSESTMANDSTMP = 1;
@@ -238,19 +236,19 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     // am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_DIS_PERIPHS_ALL, 0);
     // MCUCTRL->XTALCTRL = 0;
     // am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_XTAL_PWDN_DEEPSLEEP, 0);
-    if (!pCfg->bNeedXtal) {
+    if (!pCfg->need_xtal) {
         am_hal_rtc_osc_select(AM_HAL_RTC_OSC_LFRC); // Use LFRC instead of XT
         am_hal_rtc_osc_disable();
     }
     VCOMP->PWDKEY = VCOMP_PWDKEY_PWDKEY_Key;
-    if (!pCfg->bNeedITM) {
+    if (!pCfg->need_itm) {
         MCUCTRL->DBGCTRL = 0;
     }
     // Powering down various peripheral power domains
-    if (!pCfg->bNeedITM) {
+    if (!pCfg->need_itm) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_DEBUG);
     }
-    if (!pCfg->bNeedCrypto) {
+    if (!pCfg->need_crypto) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_CRYPTO);
     }
     am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_OTP);
@@ -264,7 +262,7 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     // ns_power_down_peripherals(pCfg);
 
     #if defined(AM_PART_APOLLO510B)
-    if (pCfg->bNeedBluetooth == false) {
+    if (pCfg->need_ble == false) {
         am_devices_em9305_shutdown();
     }
     #endif
@@ -273,7 +271,7 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     //
     // Power off the RSS
     //
-    if (pCfg->bNeedBluetooth == false) {
+    if (pCfg->need_ble == false) {
         am_hal_pwrctrl_rss_pwroff();
     }
     // am_hal_pwrctrl_rss_pwroff();
@@ -283,16 +281,16 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     ns_delay_us(10000);
     // return NS_STATUS_SUCCESS;
 
-    NS_TRY(ns_set_performance_mode(pCfg->eAIPowerMode), "Set CPU Perf mode failed.");
+    NS_TRY(ns_set_performance_mode(pCfg->perf_mode), "Set CPU Perf mode failed.");
 
     MCUCTRL->MRAMCRYPTOPWRCTRL_b.CRYPTOCLKGATEN = 1;
 
-    if (pCfg->bEnableTempCo) {
+    if (pCfg->need_tempco) {
         ns_lp_printf("WARNING TempCo not supported.\n");
     }
-    g_ns_state.cryptoWantsToBeEnabled = pCfg->bNeedCrypto;
-    g_ns_state.cryptoCurrentlyEnabled = pCfg->bNeedCrypto;
-    g_ns_state.itmPrintWantsToBeEnabled = pCfg->bNeedITM;
+    g_ns_state.cryptoWantsToBeEnabled = pCfg->need_crypto;
+    g_ns_state.cryptoCurrentlyEnabled = pCfg->need_crypto;
+    g_ns_state.itmPrintWantsToBeEnabled = pCfg->need_itm;
 
     return ui32ReturnStatus;
 }

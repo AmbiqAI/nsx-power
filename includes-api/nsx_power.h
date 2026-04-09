@@ -73,38 +73,35 @@ extern const ns_core_api_t ns_power_V1_0_0;
 extern const ns_core_api_t ns_power_oldest_supported_version;
 extern const ns_core_api_t ns_power_current_version;
 
+/// CPU performance / clock-speed mode.
 typedef enum {
-    NS_POWER_MODE_NOT_SET = -1,
-    NS_MINIMUM_PERF = 0, ///< slowest clock (96Mhz)
-    NS_MEDIUM_PERF = 1,  ///< 96Mhz clock
-    NS_MAXIMUM_PERF = 2  ///< 192Mhz clock
-} ns_power_mode_e;
+    NS_PERF_NOT_SET = -1,
+    NS_PERF_LOW     = 0, ///< LP 96 MHz (HFRC)
+    NS_PERF_HIGH    = 1, ///< HP 250 MHz (HFRC2, Apollo5) / 192 MHz (Apollo4)
+    NS_PERF_MAX     = 2  ///< HP2 (Apollo510L only, otherwise same as HIGH)
+} ns_perf_mode_e;
 
-/// Power Mode Definitino
+/// Power configuration — controls which subsystems stay powered.
 typedef struct {
-    const ns_core_api_t *api;     ///< API prefix
-    ns_power_mode_e eAIPowerMode; ///< CPU power mode (controls clock speed, etc)
-    bool bNeedAudAdc;             ///< Prevents AUDADC from being powered off
-    bool bNeedSharedSRAM;         ///< Prevents SSRAM from being powered off
-    bool bNeedCrypto;             ///< Prevents Crypto from being powered off
-    bool bNeedBluetooth;          ///< Prevents BLE from being powered off
-    bool bNeedUSB;                ///< Prevents USB from being powered off
-    bool bNeedIOM;                ///< Prevents IOMx from being powered off
-    bool bNeedAlternativeUART;    ///< for EEMBC Power Control Module and similar
-    bool b128kTCM;                ///< Only enable 128k when true, 384k otherwise
-    bool bEnableTempCo;           ///< Enable Temperature Compensation
-    bool bNeedITM;                ///< Enable ITM printing
-    bool bNeedXtal;               ///< Enable XTAL
-    bool bEnableSpotMgrProfile;   ///< Enable SpotManager profile (Apollo5 family only, collapses STM power states)
+    const ns_core_api_t *api;       ///< API version
+    ns_perf_mode_e perf_mode;       ///< CPU clock mode
+    bool need_audadc;               ///< Keep audio ADC powered
+    bool need_ssram;                ///< Keep shared SRAM powered
+    bool need_crypto;               ///< Keep crypto block powered
+    bool need_ble;                  ///< Keep BLE powered
+    bool need_usb;                  ///< Keep USB powered
+    bool need_iom;                  ///< Keep IOM interfaces powered
+    bool need_uart;                 ///< Keep alternative UART powered
+    bool small_tcm;                 ///< Use 32K ITCM + 128K DTCM (vs full)
+    bool need_tempco;               ///< Enable temperature compensation
+    bool need_itm;                  ///< Keep ITM/SWO debug output
+    bool need_xtal;                 ///< Keep XTAL oscillator
+    bool spotmgr_collapse;          ///< SpotManager STM state collapse (Apollo5 family)
 } ns_power_config_t;
 
-extern const ns_power_config_t ns_development_default; ///< Enables most things
-extern const ns_power_config_t ns_debug_default;       ///< Enables all things
-extern const ns_power_config_t ns_good_default;  ///< Reasonable settings for more applications
-extern const ns_power_config_t ns_mlperf_mode1;  ///< Good power/perf setting
-extern const ns_power_config_t ns_mlperf_mode2;  ///< Good power/perf setting
-extern const ns_power_config_t ns_mlperf_mode3;  ///< Good power/perf setting
-extern const ns_power_config_t ns_audio_default; ///< Good for AI that uses audio peripherals
+extern const ns_power_config_t ns_power_all_on;   ///< Everything enabled — development/debug
+extern const ns_power_config_t ns_power_minimal;   ///< Minimal peripherals — good starting point
+extern const ns_power_config_t ns_power_audio;     ///< Audio ADC on, most else off
 
 /**
  * @brief Set SOC Power Mode
@@ -124,10 +121,129 @@ extern void ns_deep_sleep(void);
 /**
  * @brief Sets CPU frequency to one of the ns_power_modes
  *
- * @param eAIPowerMode
+ * @param mode  Desired performance mode
  * @return uint32_t status
  */
-uint32_t ns_set_performance_mode(ns_power_mode_e eAIPowerMode);
+uint32_t ns_set_performance_mode(ns_perf_mode_e mode);
+
+/* ===================================================================
+ * Power-down helpers
+ *
+ * Building blocks for low-power operation.  Each does one thing with
+ * the correct register sequence.
+ *
+ * General-purpose (safe to call from any app):
+ *   ns_power_shutdown_peripherals() — disable all peripheral domains
+ *   ns_power_minimize_memory()      — smallest TCM, no SSRAM
+ *   ns_power_tristate_gpios()       — float unused pins
+ *   ns_power_disable_debug()        — disable SWO/ITM + debug domain
+ *   ns_power_disable_caches()       — invalidate + disable I/D cache
+ *
+ * NVM shutdown (irreversible — power measurement only):
+ *   ns_power_disable_nvm()          — request MRAM power-off
+ *   NS_POWER_DRAIN_NVM()            — finalize NVM shutdown
+ *
+ * Recommended full sequence for minimum active current:
+ *   1. ns_power_disable_debug()
+ *   2. ns_power_shutdown_peripherals()
+ *   3. ns_power_minimize_memory()
+ *   4. ns_power_tristate_gpios(keep_pins, n)
+ *   5. ns_set_performance_mode()        — select clock LAST
+ *   6. (from ITCM) ns_power_disable_nvm() + NS_POWER_DRAIN_NVM()
+ *   7. (from ITCM) ns_power_disable_caches() — if no MRAM calls
+ * =================================================================== */
+
+/**
+ * @brief Shut down all non-core peripherals and timers.
+ *
+ * Disables all device power domains (USB, audio, crypto, IOM, etc.),
+ * XTAL oscillator, voltage comparator, and all 16 hardware timers.
+ * Does NOT touch memory config, GPIO, or debug — call the dedicated
+ * helpers for those.
+ *
+ * Safe to call from any app that no longer needs peripheral I/O.
+ *
+ * @return 0 on success.
+ */
+uint32_t ns_power_shutdown_peripherals(void);
+
+/**
+ * @brief Configure minimal memory for lowest power.
+ *
+ * Sets 32 KB ITCM + 128 KB DTCM, single NVM bank, no shared SRAM,
+ * and enables MRAM low-power read mode.  Suitable for small
+ * ITCM-resident workloads with data in DTCM only.
+ *
+ * Any code or data outside these regions will be inaccessible
+ * after this call.  Ensure your stack, heap, and working buffers
+ * fit within 128 KB DTCM.
+ *
+ * @return 0 on success.
+ */
+uint32_t ns_power_minimize_memory(void);
+
+/**
+ * @brief Request NVM (MRAM) power-off.
+ *
+ * Clears PWRENNVM for both NVM banks and issues barrier.
+ * The NVM controller will not finalize power-down until an MRAM bus
+ * transaction completes — call NS_POWER_DRAIN_NVM() afterward.
+ *
+ * @warning After NS_POWER_DRAIN_NVM(), MRAM is inaccessible.
+ *          The caller must already be executing from ITCM/TCM.
+ */
+void ns_power_disable_nvm(void);
+
+/**
+ * @brief Force one MRAM read to drain the NVM pipeline.
+ *
+ * After ns_power_disable_nvm(), the NVM controller waits for
+ * outstanding MRAM fetches before powering down.  If the CPU never
+ * touches MRAM (e.g. all code inlined into ITCM), NVM stays on.
+ * This macro forces one volatile read to complete the shutdown.
+ *
+ * Must be called from ITCM-resident code.  After this macro,
+ * MRAM is powered off — no further MRAM access is possible.
+ */
+    #define NS_POWER_DRAIN_NVM() do { \
+        volatile uint32_t _nvm_drain = *(volatile uint32_t *)0x00430000; \
+        (void)_nvm_drain; \
+    } while (0)
+
+/**
+ * @brief Invalidate and disable I-cache and D-cache.
+ *
+ * For ITCM-only execution, caches consume power with no benefit
+ * since ITCM/DTCM are zero-wait-state.
+ *
+ * @note If any code still calls functions in MRAM (e.g. libc
+ *       memset), keep the I-cache enabled — those calls are
+ *       served from the warm cache even after NVM shutdown.
+ */
+void ns_power_disable_caches(void);
+
+/**
+ * @brief Disable SWO/ITM debug output and debug peripheral.
+ *
+ * Clears MCUCTRL DBGCTRL and powers down the debug domain.
+ * Call before entering measurement — debug logic draws current.
+ */
+void ns_power_disable_debug(void);
+
+/**
+ * @brief Tristate all GPIO pads except specified pins.
+ *
+ * Unconfigured GPIOs can leak current through internal pull
+ * resistors.  This sets every pad to disabled (high-impedance)
+ * except those listed in @p keep_pins.
+ *
+ * Typical keep list: power-monitor GPIOs, wake-up pins, or
+ * any pin that must remain driven during measurement or sleep.
+ *
+ * @param keep_pins  Array of GPIO numbers to leave configured.
+ * @param n_keep     Number of entries in keep_pins.
+ */
+void ns_power_tristate_gpios(const uint32_t *keep_pins, uint32_t n_keep);
 
     #ifdef __cplusplus
 }

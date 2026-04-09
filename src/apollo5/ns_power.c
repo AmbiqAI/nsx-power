@@ -57,27 +57,24 @@
 #include "am_hal_spotmgr.h"
 #endif
 
-uint32_t ns_set_performance_mode(ns_power_mode_e eAIPowerMode) {
-    // Configure power mode
+uint32_t ns_set_performance_mode(ns_perf_mode_e mode) {
     uint32_t retval = NS_STATUS_SUCCESS;
 #ifdef apollo510L_eb
-    if (eAIPowerMode == NS_MAXIMUM_PERF) {
+    if (mode == NS_PERF_MAX) {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE2);
-    }
-    else if (eAIPowerMode == NS_MEDIUM_PERF) {
+    } else if (mode == NS_PERF_HIGH) {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE1);
     } else {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_LOW_POWER);
     }
 #else
-    if ((eAIPowerMode == NS_MAXIMUM_PERF) || (eAIPowerMode == NS_MEDIUM_PERF)) {
+    if ((mode == NS_PERF_HIGH) || (mode == NS_PERF_MAX)) {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_HIGH_PERFORMANCE);
     } else {
         retval = am_hal_pwrctrl_mcu_mode_select(AM_HAL_PWRCTRL_MCU_MODE_LOW_POWER);
     }
 #endif
-return retval;
-
+    return retval;
 }
 
 //*****************************************************************************
@@ -155,7 +152,7 @@ void ns_power_memory_config(const ns_power_config_t *pCfg) {
 //     #endif
 // #endif
 
-    if (pCfg->bNeedSharedSRAM == false) {
+    if (pCfg->need_ssram == false) {
         am_hal_pwrctrl_sram_memcfg_t SRAMMemCfg = {
             .eSRAMCfg = AM_HAL_PWRCTRL_SRAM_NONE,
             .eActiveWithMCU  = AM_HAL_PWRCTRL_SRAM_NONE,
@@ -208,7 +205,7 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
 
     am_bsp_low_power_init();
 
-    if (pCfg->bEnableSpotMgrProfile) {
+    if (pCfg->spotmgr_collapse) {
         am_hal_spotmgr_profile_t spotmgr_profile;
         spotmgr_profile.PROFILE = 0;
         spotmgr_profile.PROFILE_b.COLLAPSESTMANDSTMP = 1;
@@ -235,19 +232,19 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     // am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_DIS_PERIPHS_ALL, 0);
     // MCUCTRL->XTALCTRL = 0;
     // am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_XTAL_PWDN_DEEPSLEEP, 0);
-    if (!pCfg->bNeedXtal) {
+    if (!pCfg->need_xtal) {
         am_hal_rtc_osc_select(AM_HAL_RTC_OSC_LFRC); // Use LFRC instead of XT
         am_hal_rtc_osc_disable();
     }
     VCOMP->PWDKEY = VCOMP_PWDKEY_PWDKEY_Key;
-    if (!pCfg->bNeedITM) {
+    if (!pCfg->need_itm) {
         MCUCTRL->DBGCTRL = 0;
     }
     // Powering down various peripheral power domains
-    if (!pCfg->bNeedITM) {
+    if (!pCfg->need_itm) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_DEBUG);
     }
-    if (!pCfg->bNeedCrypto) {
+    if (!pCfg->need_crypto) {
         am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_CRYPTO);
     }
     am_hal_pwrctrl_periph_disable(AM_HAL_PWRCTRL_PERIPH_OTP);
@@ -261,7 +258,7 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     // ns_power_down_peripherals(pCfg);
 
     #ifdef apollo510b_evb
-    if (pCfg->bNeedBluetooth == false) {
+    if (pCfg->need_ble == false) {
         am_devices_em9305_shutdown();
     }
     #endif
@@ -275,15 +272,15 @@ int32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
 
     // Configure power mode
     ns_delay_us(10000);
-    NS_TRY(ns_set_performance_mode(pCfg->eAIPowerMode), "Set CPU Perf mode failed.");
+    NS_TRY(ns_set_performance_mode(pCfg->perf_mode), "Set CPU Perf mode failed.");
     MCUCTRL->MRAMCRYPTOPWRCTRL_b.CRYPTOCLKGATEN = 1;
 
-    if (pCfg->bEnableTempCo) {
+    if (pCfg->need_tempco) {
         ns_lp_printf("WARNING TempCo not supported.\n");
     }
-    g_ns_state.cryptoWantsToBeEnabled = pCfg->bNeedCrypto;
-    g_ns_state.cryptoCurrentlyEnabled = pCfg->bNeedCrypto;
-    g_ns_state.itmPrintWantsToBeEnabled = pCfg->bNeedITM;
+    g_ns_state.cryptoWantsToBeEnabled = pCfg->need_crypto;
+    g_ns_state.cryptoCurrentlyEnabled = pCfg->need_crypto;
+    g_ns_state.itmPrintWantsToBeEnabled = pCfg->need_itm;
 
     return ui32ReturnStatus;
 }
@@ -317,4 +314,89 @@ void ns_platform_deep_sleep(void) {
 
     // if (g_ns_state.tempcoWantsToBeEnabled) { // isr turns ADC on
     // }
+}
+
+/* ===================================================================
+ * Power measurement helpers
+ * =================================================================== */
+
+uint32_t ns_power_shutdown_peripherals(void) {
+    // Disable all device and audio-subsystem power domains
+    am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_DIS_PERIPHS_ALL, 0);
+    am_hal_pwrctrl_control(AM_HAL_PWRCTRL_CONTROL_XTAL_PWDN_DEEPSLEEP, 0);
+
+    // Voltage comparator off
+    VCOMP->PWDKEY = VCOMP_PWDKEY_PWDKEY_Key;
+
+    // Stop all 16 hardware timers
+    for (uint32_t t = 0; t < 16; t++) {
+        am_hal_timer_stop(t);
+    }
+
+    return AM_HAL_STATUS_SUCCESS;
+}
+
+uint32_t ns_power_minimize_memory(void) {
+    // Smallest TCM: 32K ITCM + 128K DTCM.  Single NVM bank.
+    am_hal_pwrctrl_mcu_memory_config_t mem = {
+        .eROMMode              = AM_HAL_PWRCTRL_ROM_AUTO,
+        .eDTCMCfg              = AM_HAL_PWRCTRL_ITCM32K_DTCM128K,
+        .eRetainDTCM           = AM_HAL_PWRCTRL_MEMRETCFG_TCMPWDSLP_RETAIN,
+        .eNVMCfg               = AM_HAL_PWRCTRL_NVM0_ONLY,
+        .bKeepNVMOnInDeepSleep = false,
+    };
+    am_hal_pwrctrl_mcu_memory_config(&mem);
+
+    // No shared SRAM
+    am_hal_pwrctrl_sram_memcfg_t sram = {
+        .eSRAMCfg        = AM_HAL_PWRCTRL_SRAM_NONE,
+        .eActiveWithMCU  = AM_HAL_PWRCTRL_SRAM_NONE,
+        .eActiveWithGFX  = AM_HAL_PWRCTRL_SRAM_NONE,
+        .eActiveWithDISP = AM_HAL_PWRCTRL_SRAM_NONE,
+        .eSRAMRetain     = AM_HAL_PWRCTRL_SRAM_NONE,
+    };
+    am_hal_pwrctrl_sram_config(&sram);
+
+    // MRAM low-power read mode + crypto clock gate
+    MCUCTRL->MRAMCRYPTOPWRCTRL_b.MRAM0PWRCTRL    = 1;
+    MCUCTRL->MRAMCRYPTOPWRCTRL_b.MRAM0LPREN      = 1;
+    MCUCTRL->MRAMCRYPTOPWRCTRL_b.CRYPTOCLKGATEN   = 1;
+
+    return AM_HAL_STATUS_SUCCESS;
+}
+
+void ns_power_disable_nvm(void) {
+    PWRCTRL->MEMPWREN_b.PWRENNVM  = 0;
+    PWRCTRL->MEMPWREN_b.PWRENNVM1 = 0;
+    __DSB();
+    __ISB();
+}
+
+void ns_power_disable_caches(void) {
+    SCB->ICIALLU = 0;          // Invalidate entire I-cache
+    __DSB();
+    __ISB();
+    SCB->CCR &= ~SCB_CCR_IC_Msk;   // Disable I-cache
+    SCB->CCR &= ~SCB_CCR_DC_Msk;   // Disable D-cache
+    __DSB();
+    __ISB();
+}
+
+void ns_power_disable_debug(void) {
+    MCUCTRL->DBGCTRL = 0;
+}
+
+void ns_power_tristate_gpios(const uint32_t *keep_pins, uint32_t n_keep) {
+    for (uint32_t pin = 0; pin < AM_HAL_GPIO_MAX_PADS; pin++) {
+        bool keep = false;
+        for (uint32_t i = 0; i < n_keep; i++) {
+            if (keep_pins[i] == pin) {
+                keep = true;
+                break;
+            }
+        }
+        if (!keep) {
+            am_hal_gpio_pinconfig(pin, am_hal_gpio_pincfg_disabled);
+        }
+    }
 }

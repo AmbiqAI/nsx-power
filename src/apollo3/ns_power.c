@@ -49,7 +49,7 @@
 #include "ns_core.h"
 #include "nsx_power.h"
 
-uint32_t ns_set_performance_mode(ns_power_mode_e eAIPowerMode) {
+uint32_t ns_set_performance_mode(ns_perf_mode_e mode) {
     am_hal_burst_mode_e eBurstMode;
     am_hal_burst_avail_e eBurstModeAvailable;
 
@@ -61,12 +61,11 @@ uint32_t ns_set_performance_mode(ns_power_mode_e eAIPowerMode) {
         g_ns_state.ap3BurstModeInitialized = true;
     }
 
-    // Configure power mode
-    if ((eAIPowerMode == NS_MAXIMUM_PERF) || (eAIPowerMode == NS_MEDIUM_PERF))
+    if ((mode == NS_PERF_HIGH) || (mode == NS_PERF_MAX))
         return am_hal_burst_mode_enable(&eBurstMode);
-    else if (eAIPowerMode == NS_MINIMUM_PERF)
+    else if (mode == NS_PERF_LOW)
         return am_hal_burst_mode_disable(&eBurstMode);
-    else 
+    else
         return NS_STATUS_FAILURE;
 }
 
@@ -82,7 +81,7 @@ uint32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     uint32_t ui32ReturnStatus = AM_HAL_STATUS_SUCCESS;
 
     am_bsp_low_power_init();
-    NS_TRY(ns_set_performance_mode(pCfg->eAIPowerMode), "Set CPU Perf mode failed.");
+    NS_TRY(ns_set_performance_mode(pCfg->perf_mode), "Set CPU Perf mode failed.");
     am_hal_cachectrl_config(&am_hal_cachectrl_defaults);
     am_hal_cachectrl_enable();
 
@@ -99,9 +98,9 @@ uint32_t ns_power_platform_config(const ns_power_config_t *pCfg) {
     //     am_util_stdio_printf("Failed to set cache into LPMMODE_AGGRESSIVE.\n");
     //     while(1);
     // }
-    g_ns_state.cryptoWantsToBeEnabled = pCfg->bNeedCrypto;
-    g_ns_state.cryptoCurrentlyEnabled = pCfg->bNeedCrypto;
-    g_ns_state.itmPrintWantsToBeEnabled = pCfg->bNeedITM;
+    g_ns_state.cryptoWantsToBeEnabled = pCfg->need_crypto;
+    g_ns_state.cryptoCurrentlyEnabled = pCfg->need_crypto;
+    g_ns_state.itmPrintWantsToBeEnabled = pCfg->need_itm;
 
     return ui32ReturnStatus;
 }
