@@ -360,6 +360,7 @@ uint32_t ns_power_minimize_memory(void) {
     // MRAM low-power read mode + crypto clock gate
     MCUCTRL->MRAMCRYPTOPWRCTRL_b.MRAM0PWRCTRL    = 1;
     MCUCTRL->MRAMCRYPTOPWRCTRL_b.MRAM0LPREN      = 1;
+    MCUCTRL->MRAMCRYPTOPWRCTRL_b.MRAM0SLPEN      = 0;
     MCUCTRL->MRAMCRYPTOPWRCTRL_b.CRYPTOCLKGATEN   = 1;
 
     return AM_HAL_STATUS_SUCCESS;
